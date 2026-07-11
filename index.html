@@ -1,1 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bubble Shooter Game</title>
+    <style>
+        body {
+            background-color: #1a1a2e;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
 
+        #game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #162447;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            border: 2px solid #0f4c81;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            width: 440px;
+            margin-bottom: 10px;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        #score-board {
+            color: #e43f5a;
+        }
+
+        canvas {
+            background-color: #1b1b2f;
+            border: 4px solid #1f4068;
+            border-radius: 6px;
+            cursor: crosshair;
+        }
+
+        .footer {
+            margin-top: 15px;
+            font-size: 0.95rem;
+            letter-spacing: 1px;
+            color: #a2a8d3;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.6);
+        }
+
+        .footer span {
+            color: #00fff0;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div class="header">
+        <div>BUBBLE SHOOTER</div>
+        <div id="score-board">SCORE: <span id="score">0</span></div>
+    </div>
+    
+    <canvas id="gameCanvas" width="440" height="560"></canvas>
+    
+    <!-- Customization: Your name mentioned right here at the bottom -->
+    <div class="footer">
+        Created by: <span>Your Name</span>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = document.getElementById("score");
+
+    // Game variables
+    const BUBBLE_RADIUS = 20;
+    const ROWS = 6;
+    const COLS = 11;
+    const COLORS = ["#ff2e63", "#00adb5", "#95e1d3", "#fce38a", "#aa96da"];
+    
+    let score = 0;
+    let grid = [];
+    let currentBubble = null;
+    let nextBubbleColor = "";
+    
+    // Cannon position
+    const cannonX = canvas.width / 2;
+    const cannonY = canvas.height - 40;
+
+    // Mouse coordinates
+    let mouseX = canvas.width / 2;
+    let mouseY = 0;
+
+    // Initialize Game Grid
+    function initGrid() {
+        grid = [];
+        for (let r = 0; r < ROWS; r++) {
+            grid[r] = [];
+            for (let c = 0; c < COLS; c++) {
+                // Pre-fill the top rows with bubbles
+                if (r < 4) {
+                    const randomColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+                    grid[r][c] = {
+                        x: getBubbleX(r, c),
+                        y: getBubbleY(r),
+                        color: randomColor,
+                        active: true
+                    };
+                } else {
+                    grid[r][c] = null; // Empty slot
+                }
+            }
+        }
+    }
+
+    // Dynamic grid alignments (Offsetting odd rows for hex layout)
+    function getBubbleX(row, col) {
+        let x = col * BUBBLE_RADIUS * 2 + BUBBLE_RADIUS;
+        if (row % 2 === 1) {
+            x += BUBBLE_RADIUS;
+        }
+        return x;
+    }
+
+    function getBubbleY(row) {
+        return row * BUBBLE_RADIUS * 1.732 + BUBBLE_RADIUS + 10; // 1.732 handles hex nesting
+    }
+
+    // Generate upcoming shooter ammo
+    function getRandomColor() {
+        return COLORS[Math.floor(Math.random() * COLORS.length)];
+    }
+
+    function createNewBubble() {
+        const color = nextBubbleColor || getRandomColor();
+        nextBubbleColor = getRandomColor();
+        
+        currentBubble = {
+            x: cannonX,
+            y: cannonY,
+            vx: 0,
+            vy: 0,
+            color: color,
+            shooting: false
+        };
+    }
+
+    // Fire current bubble toward mouse target
+    function shootBubble() {
+        if (currentBubble.shooting) return;
+
+        const angle = Math.atan2(mouseY - cannonY, mouseX - cannonX);
+        const speed = 12;
+
+        currentBubble.vx = Math.cos(angle) * speed;
+        currentBubble.vy = Math.sin(angle) * speed;
+        currentBubble.shooting = true;
+    }
+
+    // Check distance collision
+    function getDistance(x1, y1, x2, y2) {
+        return Math.hypot(x2 - x1, y2 - y1);
+    }
+
+    // Lock the bubble safely inside closest open grid index
+    function snapToGrid(bubble) {
+        let bestRow = 0;
+        let bestCol = 0;
+        let minDistance = Infinity;
+
+        // Scan array grid structural bounds
+        for (let r = 0; r < 12; r++) { 
+            if (!grid[r]) grid[r] = new Array(COLS).fill(null);
+            for (let c = 0; c < COLS; c++) {
+                // Ensure boundary safety for staggered layout columns
+                if (r % 2 === 1 && c === COLS - 1) continue;
+
+                const slotX = getBubbleX(r, c);
+                const slotY = getBubbleY(r);
+                const dist = getDistance(bubble.x, bubble.y, slotX, slotY);
+
+                if (dist < minDistance && (!grid[r][c] || !grid[r][c].active)) {
+                    minDistance = dist;
+                    bestRow = r;
+                    bestCol = c;
+                }
+            }
+        }
+
+        // Drop bubble into calculated grid coordinates
+        grid[bestRow][bestCol] = {
+            x: getBubbleX(bestRow, bestCol),
+            y: getBubbleY(bestRow),
+            color: bubble.color,
+            active: true
+        };
+
+        // Match patterns & clean floating clusters
+        checkMatches(bestRow, bestCol, bubble.color);
+        createNewBubble();
+    }
+
+    // Pop matching neighboring bubble chains (Flood Fill Algorithm)
+    function checkMatches(startRow, startCol, targetColor) {
+        let matches = [];
+        let visited = Array.from({ length: grid.length }, () => Array(COLS).fill(false));
+        let queue = [{ r: startRow, c: startCol }];
+
+        while (queue.length > 0) {
+            let curr = queue.shift();
+            if (!curr || visited[curr.r]?.[curr.c]) continue;
+
+            visited[curr.r][curr.c] = true;
+            let cell = grid[curr.r]?.[curr.c];
+
+            if (cell && cell.active && cell.color === targetColor) {
+                matches.push(curr);
+
+                // Check neighbors based on hexagon row layouts
+                let neighbors = getNeighbors(curr.r, curr.c);
+                neighbors.forEach(n => {
+                    if (!visited[n.r]?.[n.c]) queue.push(n);
+                });
+            }
+        }
+
+        // Standard requirement: pop only groups of 3 or more matching bubbles
+        if (matches.length >= 3) {
+            matches.forEach(pos => {
+                grid[pos.r][pos.v] = null; 
+                grid[pos.r][pos.c] = null;
+                score += 10;
+            });
+            scoreEl.innerText = score;
+            dropFloatingBubbles();
+        }
+    }
+
+    function getNeighbors(row, col) {
+        let neighbors = [
+            { r: row, c: col - 1 }, { r: row, c: col + 1 }, // Left and Right
+            { r: row - 1, c: col }, { r: row + 1, c: col }  // Top and Bottom straight
+        ];
+
+        // Staggered offsets depending if row is even or odd
+        if (row % 2 === 0) {
+            neighbors.push({ r: row - 1, c: col - 1 }, { r: row + 1, c: col - 1 });
+        } else {
+            neighbors.push({ r: row - 1, c: col + 1 }, { r: row + 1, c: col + 1 });
+        }
+        return neighbors;
+    }
+
+    // Clear detached, floating bubbles hanging in mid-air
+    function dropFloatingBubbles() {
+        let connectedToCeiling = Array.from({ length: grid.length }, () => Array(COLS).fill(false));
+        let queue = [];
+
+        // Check top boundary nodes
+        for (let c = 0; c < COLS; c++) {
+            if (grid[0]?.[c] && grid[0][c].active) {
+                queue.push({ r: 0, c: c });
+            }
+        }
+
+        while (queue.length > 0) {
+            let curr = queue.shift();
+            if (connectedToCeiling[curr.r][curr.c]) continue;
+            connectedToCeiling[curr.r][curr.c] = true;
+
+            let neighbors = getNeighbors(curr.r, curr.c);
+            neighbors.forEach(n => {
+                if (grid[n.r]?.[n.c] && grid[n.r][n.c].active && !connectedToCeiling[n.r][n.c]) {
+                    queue.push(n);
+                }
+            });
+        }
+
+        // Wipe any active node not attached back to row 0 ceiling
+        for (let r = 0; r < grid.length; r++) {
+            for (let c = 0; c < COLS; c++) {
+                if (grid[r]?.[c] && grid[r][c].active && !connectedToCeiling[r][c]) {
+                    grid[r][c] = null;
+                }
+            }
+        }
+    }
+
+    // Engine Loop logic updates
+    function update() {
+        if (currentBubble && currentBubble.shooting) {
+            currentBubble.x += currentBubble.vx;
+            currentBubble.y += currentBubble.vy;
+
+            // Wall bounce constraints
+            if (currentBubble.x - BUBBLE_RADIUS <= 0 || currentBubble.x + BUBBLE_RADIUS >= canvas.width) {
+                currentBubble.vx *= -1;
+            }
+
+            // Top screen hit
+            if (currentBubble.y - BUBBLE_RADIUS <= 0) {
+                snapToGrid(currentBubble);
+                return;
+            }
+
+            // Grid collision handling loops
+            for (let r = 0; r < grid.length; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    let cell = grid[r]?.[c];
+                    if (cell && cell.active) {
+                        if (getDistance(currentBubble.x, currentBubble.y, cell.x, cell.y) < BUBBLE_RADIUS * 2) {
+                            snapToGrid(currentBubble);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Game drawing functions
+    function drawBubble(x, y, color) {
+        ctx.beginPath();
+        ctx.arc(x, y, BUBBLE_RADIUS - 2, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        
+        // Specular highlight shine detail
+        ctx.beginPath();
+        ctx.arc(x - 5, y - 5, 4, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+        ctx.fill();
+        ctx.closePath();
+    }
+
+    function render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw existing map elements
+        for (let r = 0; r < grid.length; r++) {
+            for (let c = 0; c < COLS; c++) {
+                let cell = grid[r]?.[c];
+                if (cell && cell.active) {
+                    drawBubble(cell.x, cell.y, cell.color);
+                }
+            }
+        }
+
+        // Draw visual aim guideline indicator
+        ctx.beginPath();
+        ctx.setLineDash([4, 8]);
+        ctx.moveTo(cannonX, cannonY);
+        ctx.lineTo(mouseX, mouseY);
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Draw active blaster ammo reloading states
+        if (currentBubble) {
+            drawBubble(currentBubble.x, currentBubble.y, currentBubble.color);
+        }
+
+        // Draw secondary next queue bubble preview
+        drawBubble(40, canvas.height - 40, nextBubbleColor);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+        ctx.font = "12px sans-serif";
+        ctx.fillText("NEXT", 25, canvas.height - 15);
+
+        // Draw targeting cannon structure base
+        ctx.beginPath();
+        ctx.arc(cannonX, cannonY, 24, Math.PI, 0);
+        ctx.fillStyle = "#1f4068";
+        ctx.fill();
+    }
+
+    function gameLoop() {
+        update();
+        render();
+        requestAnimationFrame(gameLoop);
+    }
+
+    // Capture user interface gestures
+    canvas.addEventListener("mousemove", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        mouseX = e.clientX - rect.left;
+        mouseY = e.clientY - rect.top;
+        
+        // Prevent targeting down backwards
+        if (mouseY >= cannonY) mouseY = cannonY - 5;
+    });
+
+    canvas.addEventListener("click", shootBubble);
+
+    // Run setup sequences
+    initGrid();
+    createNewBubble();
+    gameLoop();
+</script>
+
+</body>
+</html>
